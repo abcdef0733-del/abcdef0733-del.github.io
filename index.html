@@ -55,7 +55,7 @@ label{display:grid;gap:2px;font-size:12px;color:var(--mute);flex:1}
 <script id="data" type="application/json">{"store":{"name":"دلوقتي ماركت","wa":"201003293188","phone":"+201003293188","map":"https://maps.google.com/?q=30.0444,31.2357"},"cats":[{"id":"c1","name":"خضار وفاكهة","icon":"🥬"},{"id":"c2","name":"ألبان وجبن","icon":"🥛"},{"id":"c3","name":"مخبوزات","icon":"🍞"},{"id":"c4","name":"مشروبات","icon":"🧃"},{"id":"c5","name":"منظفات","icon":"🧴"}],"prods":[{"id":"p1","cat":"c1","name":"طماطم","price":25,"unit":"كيلو","emoji":"🍅"},{"id":"p2","cat":"c1","name":"موز","price":40,"unit":"كيلو","emoji":"🍌"},{"id":"p3","cat":"c1","name":"خيار","price":20,"unit":"كيلو","emoji":"🥒"},{"id":"p4","cat":"c2","name":"لبن كامل الدسم","price":48,"unit":"لتر","emoji":"🥛"},{"id":"p5","cat":"c2","name":"جبنة رومي","price":180,"unit":"كيلو","emoji":"🧀"},{"id":"p6","cat":"c3","name":"عيش بلدي","price":10,"unit":"5 أرغفة","emoji":"🍞"},{"id":"p7","cat":"c4","name":"عصير برتقال","price":22,"unit":"علبة","emoji":"🧃"},{"id":"p8","cat":"c4","name":"مياه معدنية","price":8,"unit":"زجاجة","emoji":"💧"},{"id":"p9","cat":"c5","name":"سائل جلي","price":35,"unit":"زجاجة","emoji":"🧴"}]}</script>
 <script>
 const S=JSON.parse(document.getElementById('data').textContent);
-const cart={};let tab='orders',orders=[],jard=false,ps={},prevNew=-1,unsub=null,cat=S.cats[0]&&S.cats[0].id,admin=false,owner=false,open=null;
+const cart={};let tab='orders',ordersErr='',orders=[],jard=false,ps={},prevNew=-1,unsub=null,cat=S.cats[0]&&S.cats[0].id,admin=false,owner=false,open=null;
 const $=s=>document.querySelector(s);
 const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const prod=id=>S.prods.find(p=>p.id===id);
@@ -90,7 +90,7 @@ function orderCard(o){
  return `<div class="sec"><b>#${num} — ${ST[o.status]||o.status}</b><small>${t}</small><div>${esc(o.name)} · <a href="tel:${esc(o.phone)}">${esc(o.phone)}</a><br>${esc(o.addr)}</div><div>${items}</div><b>${o.total} ج.م — دفع عند الاستلام</b><div style="display:flex;gap:6px;flex-wrap:wrap">${x}</div></div>`}
 function ordersView(){
  const act=orders.filter(o=>['new','prep','ready'].includes(o.status)),old=orders.filter(o=>!act.includes(o));
- return `<div class="grid" style="display:block">${act.map(orderCard).join('')||'<p class="empty">لا توجد طلبات نشطة</p>'}${old.length?'<h3>السابقة</h3>'+old.slice(0,20).map(orderCard).join(''):''}</div>`}
+ return `<div class="grid" style="display:block">${ordersErr?'<div class="note">تعذر تحميل الطلبات: '+ordersErr+'</div>':''}${act.map(orderCard).join('')||'<p class="empty">لا توجد طلبات نشطة</p>'}${old.length?'<h3>السابقة</h3>'+old.slice(0,20).map(orderCard).join(''):''}</div>`}
 const po=()=>orders.find(o=>o.id===String(open).slice(5));
 function prepView(o){
  const s=ps[o.id]||(ps[o.id]={});
@@ -166,13 +166,14 @@ async function send(){
  if(!n||!a||!ph){alert('اكتب الاسم والعنوان ورقم الموبايل');return}
  const w=window.open('about:blank','_blank');
  const items=Object.entries(cart).filter(([i])=>prod(i)).map(([i,q])=>({id:i,name:prod(i).name,price:prod(i).price,qty:q,barcode:String(prod(i).barcode||'').trim()}));
- let num='';
- try{const d=await db.collection('orders').add({items,total:total(),name:n,addr:a,phone:ph,status:'new',ts:Date.now()});num=d.id.slice(0,5).toUpperCase()}catch(e){}
+ let num='',err='';
+ try{const d=await Promise.race([db.collection('orders').add({items,total:total(),name:n,addr:a,phone:ph,status:'new',ts:Date.now()}),new Promise((_,r)=>setTimeout(()=>r({code:'timeout'}),8000))]);num=d.id.slice(0,5).toUpperCase()}catch(e){err=(e&&(e.code||e.message))||'error'}
  const lines=items.map(i=>`• ${i.name} × ${i.qty} = ${i.price*i.qty} ج.م`);
  const msg=`طلب جديد${num?' #'+num:''} من ${S.store.name}\n${lines.join('\n')}\nالإجمالي: ${total()} ج.م\nالدفع: عند الاستلام\nالاسم: ${n}\nالعنوان: ${a}\nالموبايل: ${ph}`;
  const url='https://wa.me/'+S.store.wa.replace(/\D/g,'')+'?text='+encodeURIComponent(msg);
  if(w)w.location.href=url;else location.href=url;
  Object.keys(cart).forEach(k=>delete cart[k]);open=null;render();
+ alert(err?'تنبيه: الطلب لم يُحفظ في النظام ('+err+'). تم فتح واتساب فقط.':'تم حفظ طلبك رقم #'+num);
 }
 async function save(){
  S.store={name:$('#sn').value||S.store.name,wa:$('#sw').value,phone:$('#sp').value,map:$('#sm').value};
@@ -222,7 +223,7 @@ auth.onAuthStateChanged(u=>{
   orders=sn.docs.map(d=>({id:d.id,...d.data()}));
   const n=newN();if(prevNew>=0&&n>prevNew)beep();prevNew=n;
   if(!admin||(tab==='orders'&&!String(open).startsWith('prep')))render();
- },e=>{});
+ },e=>{ordersErr=(e&&e.code)||'error';if(admin&&tab==='orders')render()});
  render()});
 if(location.hash==='#admin'){open='login';render()}
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
